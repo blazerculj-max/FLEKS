@@ -2,114 +2,130 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Nastavitve strani
-st.set_page_config(page_title="FLEKS Kalkulator", layout="wide", page_icon="💰")
+# Nastavitve strani za lepši prikaz
+st.set_page_config(
+    page_title="FLEKS Premium Kalkulator",
+    page_icon="🏦",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-# --- NASLOV IN OPIS ---
-st.title("🛡️ FLEKS Kalkulator Realnega Donosa")
-st.markdown("Enostaven in natančen izračun stanja na polici ob upoštevanju vseh stroškov zavarovanja FLEKS.")
+# --- STILIZACIJA (CSS) ---
+st.markdown("""
+    <style>
+    .main {
+        background-color: #f8f9fa;
+    }
+    .stMetric {
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    </style>
+    """, unsafe_allow_stdio=True)
 
-# --- STRANSKI MENI ZA VNOS ---
+# --- NASLOVNA VRSTICA ---
+col_logo, col_text = st.columns([1, 5])
+with col_text:
+    st.title("FLEKS Premium Analitik")
+    st.caption("Profesionalno orodje za simulacijo naložbenega zavarovanja")
+
+st.write("---")
+
+# --- STRANSKI MENI ---
 with st.sidebar:
-    st.header("Parametri izračuna")
+    st.header("⚙️ Nastavitve")
     
-    # Ročni vnos donosa in dobe
-    leta = st.number_input("Doba varčevanja (leti)", min_value=1, max_value=60, value=20, step=1)
-    donos_vnos = st.number_input("Predviden letni donos (%)", min_value=0.0, max_value=20.0, value=5.0, step=0.1)
+    with st.container():
+        st.subheader("Vstopni podatki")
+        leta = st.number_input("Doba varčevanja (leti)", min_value=1, max_value=60, value=20)
+        donos_vnos = st.number_input("Predviden letni donos (%)", min_value=0.0, max_value=20.0, value=5.0, step=0.1)
     
     st.write("---")
-    # Vnosi za premije
-    mesecno = st.number_input("Mesečna premija (€)", min_value=30.0, value=100.0, step=10.0)
-    polog = st.number_input("Začetni enkratni polog (€)", min_value=0.0, value=0.0, step=500.0)
-    vsota = st.number_input("Zavarovalna vsota za primer smrti (€)", value=10000)
+    
+    with st.container():
+        st.subheader("Premije")
+        mesecno = st.number_input("Mesečna premija (€)", min_value=30.0, value=100.0, step=10.0)
+        polog = st.number_input("Začetni enkratni polog (€)", min_value=0.0, value=0.0, step=500.0)
+        vsota = st.number_input("Zavarovalna vsota ob smrti (€)", value=10000)
 
-# --- MATEMATIČNA LOGIKA (FLEKS SPECIFIKACIJE) ---
+# --- LOGIKA IZRAČUNA ---
 def izracun_fleks(leta, mesecno, polog, vsota, donos_letni):
-    # Fiksni stroški po tvojih navodilih
-    VSTOPNI_STROSKI = 0.01          # 1% na vsa vplačila
-    STROSEK_ZAVAROVANJA = 2.0       # variabilno cca 2€
-    MEJA_ZAVAROVANJA = 3500.0       # Fix strošek se neha nad tem zneskom
-    PROVIZIJA_STOPNJA = 0.0049      # 0.49% upravljalska provizija
-    TRAJANJE_PROVIZIJE = 120        # Traja 10 let (120 mesecev)
-    OSNOVA_VPLACIL = 24             # Obračunava se na prvih 24 rednih vplačil
+    VSTOPNI_STROSKI = 0.01
+    STROSEK_ZAVAROVANJA = 2.0
+    MEJA_ZAVAROVANJA = 3500.0
+    PROVIZIJA_STOPNJA = 0.0049
+    TRAJANJE_PROVIZIJE = 120
+    OSNOVA_VPLACIL = 24
     
     meseci = int(leta * 12)
     m_donos = (1 + (donos_letni/100))**(1/12) - 1
-    
-    # Začetni polog: obremenjen le z 1% vstopnih stroškov
     glavnica = polog * (1 - VSTOPNI_STROSKI)
     skupaj_vplacano = polog
     podatki = []
     
-    # Izračun neto rednega vplačila za osnovo provizije
     neto_redno_za_osnovo = (mesecno * (1 - VSTOPNI_STROSKI)) - STROSEK_ZAVAROVANJA
     
     for m in range(1, meseci + 1):
-        # 1. Obračun vplačila in vstopnih stroškov (1%)
         v_strosek = mesecno * VSTOPNI_STROSKI
-        # Strošek zavarovanja (2€), dokler stanje ne preseže 3500€
         trenutni_zav = STROSEK_ZAVAROVANJA if glavnica < MEJA_ZAVAROVANJA else 0
-        
         glavnica += (mesecno - v_strosek - trenutni_zav)
         
-        # 2. Posebna upravljalska provizija 0.49% (na prvih 24 vplačil, 10 let)
         if m <= TRAJANJE_PROVIZIJE:
-            st_vplacil_v_osnovi = min(m, OSNOVA_VPLACIL)
-            glavnica -= (st_vplacil_v_osnovi * neto_redno_za_osnovo * PROVIZIJA_STOPNJA)
+            st_enot = min(m, OSNOVA_VPLACIL)
+            glavnica -= (st_enot * neto_redno_za_osnovo * PROVIZIJA_STOPNJA)
             
-        # 3. Pripis donosa
         glavnica *= (1 + m_donos)
         skupaj_vplacano += mesecno
         
-        # Zapis za tabelo po letih
         if m % 12 == 0 or m == 1:
             podatki.append({
                 "Leto": int(m/12) if m >= 12 else 0,
-                "Vplačano skupaj (€)": round(skupaj_vplacano, 2),
-                "Realno stanje na računu (€)": round(glavnica, 2),
-                "Zavarovalna vsota (€)": vsota,
-                "Izplačilo ob smrti (€)": round(max(glavnica, vsota), 2)
+                "Vplačano": round(skupaj_vplacano, 2),
+                "Stanje na računu": round(glavnica, 2),
+                "Izplačilo ob smrti": round(max(glavnica, vsota), 2)
             })
-            
     return pd.DataFrame(podatki)
 
-# --- IZVEDBA IN PRIKAZ ---
-df_rezultat = izracun_fleks(leta, mesecno, polog, vsota, donos_vnos)
+df = izracun_fleks(leta, mesecno, polog, vsota, donos_vnos)
 
-# Glavni kazalniki (Metrike)
-c1, c2, c3 = st.columns(3)
-koncno_stanje = df_rezultat["Realno stanje na računu (€)"].iloc[-1]
-skupaj_vplacano = df_rezultat["Vplačano skupaj (€)"].iloc[-1]
-cisti_donos = koncno_stanje - skupaj_vplacano
+# --- GLAVNI PRIKAZ (DASHBOARD) ---
+koncno_stanje = df["Stanje na računu"].iloc[-1]
+vplacano = df["Vplačano"].iloc[-1]
+donos_eur = koncno_stanje - vplacano
 
-c1.metric("Predvideno stanje", f"{koncno_stanje:,.2f} €")
-c2.metric("Skupaj vplačano", f"{skupaj_vplacano:,.2f} €")
-c3.metric("Čisti donos", f"{cisti_donos:,.2f} €", delta=f"{donos_vnos}% letno")
+# Vrstica s ključnimi metrikami
+m1, m2, m3 = st.columns(3)
+m1.metric("💰 Predvideno stanje", f"{koncno_stanje:,.2f} €")
+m2.metric("📥 Skupaj vplačano", f"{vplacano:,.2f} €")
+m3.metric("📈 Čisti donos", f"{donos_eur:,.2f} €", delta=f"{((koncno_stanje/vplacano)-1)*100:.1f} %")
 
-st.write("---")
+st.write("")
 
-# Tabela in Parametri
-col_tab, col_par = st.columns([2, 1])
+# Razporeditev: Graf in Tabela
+tab1, tab2 = st.tabs(["📈 Grafični prikaz", "📋 Podrobna tabela"])
 
-with col_tab:
-    st.subheader("Pregled rasti po letih")
-    st.dataframe(df_rezultat, use_container_width=True, hide_index=True)
+with tab1:
+    fig = px.area(df, x="Leto", y=["Stanje na računu", "Vplačano"],
+                  title="Projekcija rasti premoženja",
+                  labels={"value": "Znesek (€)", "variable": "Kategorija"},
+                  color_discrete_map={"Stanje na računu": "#00CC96", "Vplačano": "#3B4C63"},
+                  template="plotly_white")
+    fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    st.plotly_chart(fig, use_container_width=True)
 
-with col_par:
-    st.subheader("Upoštevani stroški")
-    st.markdown(f"""
-    - **Vstopni stroški:** 1%
-    - **Strošek zavarovanja:** variabilno cca 2 Eur / mesec
-    - **Upravljalska provizija:** 0.49% mesečno
-      *(na prvih 24 rednih vplačil, prvih 10 let)*
-    - **Začetni polog:** brez dodatnih provizij (le 1% vstopni)
+with tab2:
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+# --- DODATNE INFORMACIJE ---
+with st.expander("ℹ️ Podrobnosti o stroških in zakonitostih"):
+    st.write(f"""
+    Izračun upošteva naslednje parametre produkta FLEKS:
+    * **Vstopni stroški:** 1% od vsakega vplačila.
+    * **Upravljalska provizija:** 0.49% mesečno na osnovo prvih {24} vplačil (prvih 10 let).
+    * **Strošek zavarovanja:** variabilno cca 2 €/mesec (dokler je stanje pod 3500 €).
+    * **Zavarovalna vsota:** {vsota:,.2f} € (zagotovljeno minimalno izplačilo ob smrti).
     """)
-    st.info("💡 Izplačilo ob smrti je zavarovalna vsota ali stanje na računu (kar je višje).")
 
-# Graf
-st.write("---")
-fig = px.area(df_rezultat, x="Leto", y=["Realno stanje na računu (€)", "Vplačano skupaj (€)"],
-              title="Projekcija akumulacije sredstev",
-              labels={"value": "Znesek (€)", "variable": "Postavka"},
-              color_discrete_map={"Realno stanje na računu (€)": "#00CC96", "Vplačano skupaj (€)": "#E5ECF6"})
-st.plotly_chart(fig, use_container_width=True)
+st.success(f"Pri {donos_vnos}% donosu bo vrednost vaše police čez {leta} let znašala {koncno_stanje:,.2f} €.")
